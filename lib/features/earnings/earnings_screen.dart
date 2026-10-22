@@ -5,9 +5,11 @@ import '../../core/api.dart';
 import '../../core/models.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../profile/bank_screen.dart';
 
-/// What the rider has earned: today, this week, this month and in total, a seven-day chart and the latest trips. How it is
-/// paid out is not set up yet, and the screen says so rather than implying money has moved.
+/// What the rider has earned, what Hyperpik still owes them, what it has already paid (each payout with its bank reference),
+/// a seven-day chart and the latest trips. Hyperpik pays riders by bank transfer, so without a bank account on file the screen
+/// asks for one.
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key, required this.active});
   final bool active;
@@ -18,6 +20,7 @@ class EarningsScreen extends StatefulWidget {
 
 class _EarningsScreenState extends State<EarningsScreen> {
   Earnings? _e;
+  List<Payout> _payouts = const [];
   String? _error;
 
   @override
@@ -35,8 +38,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Future<void> _load() async {
     try {
       final e = await Api.earnings();
+      List<Payout> payouts = _payouts;
+      try {
+        payouts = await Api.payouts();
+      } on ApiException {
+        // The earnings still show; the history just stays as it was.
+      }
       if (mounted) setState(() {
         _e = e;
+        _payouts = payouts;
         _error = null;
       });
     } on ApiException catch (ex) {
@@ -84,6 +94,31 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       ),
                       const SizedBox(height: 14),
                       Row(children: [
+                        Expanded(child: StatTile(label: 'Owed to you', value: rupees(e.owed))),
+                        const SizedBox(width: 10),
+                        Expanded(child: StatTile(label: 'Paid so far', value: rupees(e.paid))),
+                      ]),
+                      if (!e.hasBank) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: Rd.bad.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Rd.bad.withValues(alpha: 0.35))),
+                          child: Row(children: [
+                            const Icon(Icons.account_balance_rounded, color: Rd.bad),
+                            const SizedBox(width: 10),
+                            const Expanded(child: Text('Add your bank account so Hyperpik can pay you.', style: TextStyle(fontWeight: FontWeight.w700, height: 1.3))),
+                            TextButton(
+                              onPressed: () async {
+                                final saved = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const BankScreen()));
+                                if (saved == true) _load();
+                              },
+                              child: const Text('Add'),
+                            ),
+                          ]),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Row(children: [
                         Expanded(child: StatTile(label: 'Today', value: rupees(e.today))),
                         const SizedBox(width: 10),
                         Expanded(child: StatTile(label: 'This week', value: rupees(e.week))),
@@ -112,6 +147,25 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           ]),
                         ),
                       const SizedBox(height: 18),
+                      const Text('Payouts', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 10),
+                      if (_payouts.isEmpty)
+                        const Padding(padding: EdgeInsets.all(16), child: Center(child: Text('No payouts yet. Each one will show here with its bank reference.', textAlign: TextAlign.center, style: TextStyle(color: Rd.muted))))
+                      else
+                        Container(
+                          decoration: BoxDecoration(color: Rd.card, borderRadius: BorderRadius.circular(22), border: Border.all(color: Rd.line)),
+                          child: Column(children: [
+                            for (var i = 0; i < _payouts.length; i++) ...[
+                              if (i > 0) const Divider(height: 1, color: Rd.line),
+                              ListTile(
+                                leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: Rd.accent.withValues(alpha: 0.16), shape: BoxShape.circle), child: const Icon(Icons.account_balance_rounded, color: Rd.accent)),
+                                title: Text(rupees(_payouts[i].amount), style: const TextStyle(fontWeight: FontWeight.w900)),
+                                subtitle: Text('${DateFormat('d MMM yyyy').format(_payouts[i].at)} · ${_payouts[i].reference}', style: const TextStyle(color: Rd.muted)),
+                              ),
+                            ],
+                          ]),
+                        ),
+                      const SizedBox(height: 18),
                       const Text('Recent deliveries', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
                       const SizedBox(height: 10),
                       if (e.recent.isEmpty)
@@ -126,7 +180,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: Rd.online.withValues(alpha: 0.14), shape: BoxShape.circle), child: const Icon(Icons.check_rounded, color: Rd.online)),
                                 title: Text(e.recent[i].order ?? 'Delivery', style: const TextStyle(fontWeight: FontWeight.w800)),
                                 subtitle: Text(DateFormat('d MMM, h:mm a').format(e.recent[i].at), style: const TextStyle(color: Rd.muted)),
-                                trailing: Text('+${rupees(e.recent[i].amount)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Rd.online, fontSize: 16)),
+                                trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                  Text('+${rupees(e.recent[i].amount)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Rd.online, fontSize: 16)),
+                                  Text(e.recent[i].paidAt != null ? 'paid' : 'owed', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: e.recent[i].paidAt != null ? Rd.online : Rd.warn)),
+                                ]),
                               ),
                             ],
                           ]),

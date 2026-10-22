@@ -151,15 +151,33 @@ class Trip {
 }
 
 class Earning {
-  Earning({required this.amount, required this.kind, required this.at, this.order});
+  Earning({required this.amount, required this.kind, required this.at, this.order, this.paidAt});
   final num amount;
   final String kind;
   final DateTime at;
   final String? order;
+  /// When Hyperpik paid this earning out, or null while it is still owed.
+  final DateTime? paidAt;
+}
+
+/// One bank transfer Hyperpik made to the rider.
+class Payout {
+  Payout({required this.amount, required this.reference, required this.at});
+  final num amount;
+  final String reference;
+  final DateTime at;
+}
+
+/// The rider's bank account for payouts, with all but the last four digits hidden.
+class BankAccount {
+  BankAccount({required this.holderName, required this.last4, required this.ifsc});
+  final String holderName;
+  final String last4;
+  final String ifsc;
 }
 
 class Earnings {
-  Earnings({required this.today, required this.week, required this.month, required this.total, required this.trips, required this.recent, this.note});
+  Earnings({required this.today, required this.week, required this.month, required this.total, required this.trips, required this.recent, this.note, this.owed = 0, this.paid = 0, this.hasBank = true});
   final num today;
   final num week;
   final num month;
@@ -167,6 +185,11 @@ class Earnings {
   final int trips;
   final List<Earning> recent;
   final String? note;
+  /// Earned and not yet paid out, and paid out so far.
+  final num owed;
+  final num paid;
+  /// Whether a bank account is on file for payouts.
+  final bool hasBank;
 
   factory Earnings.fromJson(Map<String, dynamic> j) => Earnings(
         today: _n(j['today']),
@@ -175,8 +198,11 @@ class Earnings {
         total: _n(j['total']),
         trips: _n(j['trips']).toInt(),
         note: _s(j['payoutNote']),
+        owed: _n(j['owed']),
+        paid: _n(j['paid']),
+        hasBank: j['hasBank'] != false,
         recent: ((j['recent'] as List?) ?? const [])
-            .map((e) => Earning(amount: _n((e as Map)['amount']), kind: '${e['kind']}', at: DateTime.tryParse('${e['at']}')?.toLocal() ?? DateTime.now(), order: _s(e['order'])))
+            .map((e) => Earning(amount: _n((e as Map)['amount']), kind: '${e['kind']}', at: DateTime.tryParse('${e['at']}')?.toLocal() ?? DateTime.now(), order: _s(e['order']), paidAt: e['paidAt'] == null ? null : DateTime.tryParse('${e['paidAt']}')?.toLocal()))
             .toList(),
       );
 }

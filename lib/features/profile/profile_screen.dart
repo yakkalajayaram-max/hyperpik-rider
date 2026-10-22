@@ -5,6 +5,7 @@ import '../../core/api.dart';
 import '../../core/models.dart';
 import '../../core/theme.dart';
 import '../../core/work_service.dart';
+import 'bank_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, required this.rider, required this.onRefresh});
@@ -17,13 +18,28 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   String _version = '';
+  BankAccount? _bank;
+  bool _bankLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _loadBank();
     PackageInfo.fromPlatform().then((p) {
       if (mounted) setState(() => _version = '${p.version} (${p.buildNumber})');
     });
+  }
+
+  Future<void> _loadBank() async {
+    try {
+      final b = await Api.bank();
+      if (mounted) setState(() {
+        _bank = b;
+        _bankLoaded = true;
+      });
+    } on ApiException {
+      if (mounted) setState(() => _bankLoaded = true);
+    }
   }
 
   String get _vehicle => switch (widget.rider.vehicleType) {
@@ -82,6 +98,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ]),
           ),
           const SizedBox(height: 14),
+          if (r.ownerType == 'platform')
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              decoration: BoxDecoration(color: Rd.card, borderRadius: BorderRadius.circular(24), border: Border.all(color: Rd.line)),
+              child: ListTile(
+                leading: const Icon(Icons.account_balance_rounded, color: Rd.accent),
+                title: const Text('Bank account for payouts', style: TextStyle(fontWeight: FontWeight.w800)),
+                subtitle: Text(
+                  !_bankLoaded ? 'Loading…' : (_bank == null ? 'Not added yet. Hyperpik needs it to pay you.' : '${_bank!.holderName} · A/c ending ${_bank!.last4} · ${_bank!.ifsc}'),
+                  style: TextStyle(color: _bankLoaded && _bank == null ? Rd.warn : Rd.muted, fontWeight: FontWeight.w600),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
+                  final saved = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const BankScreen()));
+                  if (saved == true) _loadBank();
+                },
+              ),
+            ),
           Container(
             decoration: BoxDecoration(color: Rd.card, borderRadius: BorderRadius.circular(24), border: Border.all(color: Rd.line)),
             child: ListTile(

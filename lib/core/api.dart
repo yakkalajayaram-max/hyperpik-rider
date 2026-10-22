@@ -143,4 +143,28 @@ class Api {
   static Future<void> drop(String tripId) => _post('/api/rider/trips/$tripId/drop');
 
   static Future<Earnings> earnings() async => Earnings.fromJson(await _get('/api/rider/earnings'));
+
+  /// The payouts Hyperpik has made to this rider, newest first.
+  static Future<List<Payout>> payouts() async {
+    final j = await _get('/api/rider/payouts');
+    return ((j['payouts'] as List?) ?? const [])
+        .map((p) => Payout(amount: _num((p as Map)['amount']), reference: '${p['reference']}', at: DateTime.tryParse('${p['at']}')?.toLocal() ?? DateTime.now()))
+        .toList();
+  }
+
+  /// The bank account payouts go to (masked), or null when none is saved yet.
+  static Future<BankAccount?> bank() async {
+    final j = await _get('/api/rider/bank');
+    final b = j['bank'];
+    if (b is! Map) return null;
+    return BankAccount(holderName: '${b['holderName']}', last4: '${b['last4']}', ifsc: '${b['ifsc']}');
+  }
+
+  static Future<BankAccount> saveBank({required String holderName, required String accountNumber, required String ifsc}) async {
+    final j = await _post('/api/rider/bank', {'holderName': holderName, 'accountNumber': accountNumber, 'ifsc': ifsc});
+    final b = Map<String, dynamic>.from(j['bank'] as Map);
+    return BankAccount(holderName: '${b['holderName']}', last4: '${b['last4']}', ifsc: '${b['ifsc']}');
+  }
+
+  static num _num(Object? v) => v is num ? v : (num.tryParse('$v') ?? 0);
 }
