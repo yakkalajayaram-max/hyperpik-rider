@@ -60,4 +60,27 @@ void main() {
     expect(e.total, 900);
     expect(e.recent.single.order, 'HP1');
   });
+
+  test('a Hyperpik rider sees owed and paid; a shop rider does not', () {
+    final fleet = Earnings.fromJson({'total': 100, 'owed': 40, 'paid': 60, 'hasBank': false, 'recent': []});
+    expect(fleet.hyperpikPays, isTrue);
+    expect(fleet.owed, 40);
+    expect(fleet.paid, 60);
+    expect(fleet.hasBank, isFalse);
+    final shop = Earnings.fromJson({'total': 100, 'owed': null, 'paid': null, 'payoutNote': 'Your shop pays you directly.', 'recent': []});
+    expect(shop.hyperpikPays, isFalse);
+    expect(shop.note, contains('shop'));
+  });
+
+  test('an earning knows whether it was paid out', () {
+    final e = Earnings.fromJson({
+      'total': 10,
+      'owed': 0,
+      'paid': 10,
+      'recent': [
+        {'amount': 10, 'kind': 'delivery', 'at': '2026-10-14T09:00:00Z', 'paidAt': '2026-10-15T09:00:00Z'}
+      ],
+    });
+    expect(e.recent.single.paidAt, isNotNull);
+  });
 }

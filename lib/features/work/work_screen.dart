@@ -433,6 +433,7 @@ class _OfferCard extends StatefulWidget {
 class _OfferCardState extends State<_OfferCard> {
   Timer? _t;
   int _left = 0;
+  bool _expired = false;
 
   @override
   void initState() {
@@ -445,7 +446,10 @@ class _OfferCardState extends State<_OfferCard> {
     final e = widget.trip.expiresAt;
     final left = e == null ? 60 : e.difference(DateTime.now()).inSeconds.clamp(0, 600);
     if (mounted) setState(() => _left = left);
-    if (left == 0) widget.onDecline();
+    if (left == 0 && !_expired) {
+      _expired = true;
+      widget.onDecline();
+    }
   }
 
   @override

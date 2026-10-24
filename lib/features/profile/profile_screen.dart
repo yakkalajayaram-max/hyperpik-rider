@@ -111,7 +111,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () async {
-                  final saved = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const BankScreen()));
+                  final saved = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => BankScreen(existing: _bank)));
                   if (saved == true) _loadBank();
                 },
               ),

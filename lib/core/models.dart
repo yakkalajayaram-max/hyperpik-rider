@@ -177,7 +177,7 @@ class BankAccount {
 }
 
 class Earnings {
-  Earnings({required this.today, required this.week, required this.month, required this.total, required this.trips, required this.recent, this.note, this.owed = 0, this.paid = 0, this.hasBank = true});
+  Earnings({required this.today, required this.week, required this.month, required this.total, required this.trips, required this.recent, this.note, this.owed = 0, this.paid = 0, this.hasBank = true, this.hyperpikPays = true});
   final num today;
   final num week;
   final num month;
@@ -190,6 +190,8 @@ class Earnings {
   final num paid;
   /// Whether a bank account is on file for payouts.
   final bool hasBank;
+  /// False for a shop's own rider: the shop pays them directly, so Hyperpik shows no owed, paid or payouts.
+  final bool hyperpikPays;
 
   factory Earnings.fromJson(Map<String, dynamic> j) => Earnings(
         today: _n(j['today']),
@@ -201,6 +203,7 @@ class Earnings {
         owed: _n(j['owed']),
         paid: _n(j['paid']),
         hasBank: j['hasBank'] != false,
+        hyperpikPays: j['owed'] != null,
         recent: ((j['recent'] as List?) ?? const [])
             .map((e) => Earning(amount: _n((e as Map)['amount']), kind: '${e['kind']}', at: DateTime.tryParse('${e['at']}')?.toLocal() ?? DateTime.now(), order: _s(e['order']), paidAt: e['paidAt'] == null ? null : DateTime.tryParse('${e['paidAt']}')?.toLocal()))
             .toList(),

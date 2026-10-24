@@ -2,22 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/api.dart';
+import '../../core/models.dart';
 import '../../core/theme.dart';
 
 /// Where Hyperpik sends the rider's earnings. The rider types the account holder's name, the account number and the IFSC;
 /// the server checks them again and keeps the number, and the app only ever shows the last four digits afterwards.
 class BankScreen extends StatefulWidget {
-  const BankScreen({super.key});
+  const BankScreen({super.key, this.existing});
+
+  /// The account already on file (masked), when the rider is changing it.
+  final BankAccount? existing;
 
   @override
   State<BankScreen> createState() => _BankScreenState();
 }
 
 class _BankScreenState extends State<BankScreen> {
-  final _holder = TextEditingController();
+  late final _holder = TextEditingController(text: widget.existing?.holderName ?? '');
   final _account = TextEditingController();
   final _account2 = TextEditingController();
-  final _ifsc = TextEditingController();
+  late final _ifsc = TextEditingController(text: widget.existing?.ifsc ?? '');
   bool _busy = false;
   String? _error;
 
@@ -61,6 +65,18 @@ class _BankScreenState extends State<BankScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           const Text('Hyperpik pays your earnings to this account. Check it carefully: a wrong number sends your money to someone else.', style: TextStyle(color: Rd.muted, height: 1.4)),
+          if (widget.existing != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: Rd.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: Rd.line)),
+              child: Row(children: [
+                const Icon(Icons.lock_outline_rounded, color: Rd.muted),
+                const SizedBox(width: 10),
+                Expanded(child: Text('Saved: A/c ending ${widget.existing!.last4}. For your safety the full number is never shown. To change the account, enter the new number below.', style: const TextStyle(color: Rd.muted, height: 1.35))),
+              ]),
+            ),
+          ],
           const SizedBox(height: 18),
           TextField(controller: _holder, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Account holder name')),
           const SizedBox(height: 12),
@@ -73,7 +89,7 @@ class _BankScreenState extends State<BankScreen> {
           const SizedBox(height: 22),
           FilledButton(
             onPressed: _busy ? null : _save,
-            child: Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: Text(_busy ? 'Saving…' : 'Save bank account')),
+            child: Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: Text(_busy ? 'Saving…' : (widget.existing != null ? 'Update bank account' : 'Save bank account'))),
           ),
         ],
       ),

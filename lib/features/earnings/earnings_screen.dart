@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api.dart';
 import '../../core/models.dart';
@@ -22,6 +23,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Earnings? _e;
   List<Payout> _payouts = const [];
   String? _error;
+  Payout? _newlyPaid;
 
   @override
   void initState() {
@@ -39,18 +41,35 @@ class _EarningsScreenState extends State<EarningsScreen> {
     try {
       final e = await Api.earnings();
       List<Payout> payouts = _payouts;
-      try {
-        payouts = await Api.payouts();
-      } on ApiException {
-        // The earnings still show; the history just stays as it was.
+      if (e.hyperpikPays) {
+        try {
+          payouts = await Api.payouts();
+        } on ApiException {
+          // The earnings still show; the history just stays as it was.
+        }
       }
+      final fresh = await _newPayout(payouts);
       if (mounted) setState(() {
         _e = e;
         _payouts = payouts;
         _error = null;
+        _newlyPaid = fresh ?? _newlyPaid;
       });
     } on ApiException catch (ex) {
       if (mounted) setState(() => _error = ex.message);
+    }
+  }
+
+  /// The newest payout the rider has not been told about yet. The first look at an account only records what is there.
+  Future<Payout?> _newPayout(List<Payout> payouts) async {
+    if (payouts.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final seen = prefs.getString('seen_payout');
+      await prefs.setString('seen_payout', payouts.first.reference);
+      return (seen != null && seen != payouts.first.reference) ? payouts.first : null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -75,7 +94,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: _error != null && e == null
-            ? ListView(children: [const SizedBox(height: 120), Center(child: Text(_error!))])
+            ? ListView(children: [
+                const SizedBox(height: 120),
+                Center(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Text(_error!, textAlign: TextAlign.center))),
+                const SizedBox(height: 12),
+                Center(child: FilledButton(onPressed: _load, child: const Text('Try again'))),
+              ])
             : e == null
                 ? const Center(child: CircularProgressIndicator())
                 : ListView(
@@ -93,12 +117,26 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         ]),
                       ),
                       const SizedBox(height: 14),
-                      Row(children: [
-                        Expanded(child: StatTile(label: 'Owed to you', value: rupees(e.owed))),
-                        const SizedBox(width: 10),
-                        Expanded(child: StatTile(label: 'Paid so far', value: rupees(e.paid))),
-                      ]),
-                      if (!e.hasBank) ...[
+                      if (_newlyPaid != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: Rd.online.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(16), border: Border.all(color: Rd.online.withValues(alpha: 0.4))),
+                          child: Row(children: [
+                            const Icon(Icons.payments_rounded, color: Rd.online),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text('${rupees(_newlyPaid!.amount)} was paid to your bank. Reference ${_newlyPaid!.reference}.', style: const TextStyle(fontWeight: FontWeight.w800, height: 1.3))),
+                            IconButton(onPressed: () => setState(() => _newlyPaid = null), icon: const Icon(Icons.close_rounded, size: 18)),
+                          ]),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (e.hyperpikPays)
+                        Row(children: [
+                          Expanded(child: StatTile(label: 'Owed to you', value: rupees(e.owed))),
+                          const SizedBox(width: 10),
+                          Expanded(child: StatTile(label: 'Paid so far', value: rupees(e.paid))),
+                        ]),
+                      if (e.hyperpikPays && !e.hasBank) ...[
                         const SizedBox(height: 12),
                         Container(
                           padding: const EdgeInsets.all(14),
@@ -146,6 +184,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             Expanded(child: Text(e.note!, style: const TextStyle(height: 1.35, fontWeight: FontWeight.w600))),
                           ]),
                         ),
+                      if (e.hyperpikPays) ...[
                       const SizedBox(height: 18),
                       const Text('Payouts', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
                       const SizedBox(height: 10),
@@ -165,6 +204,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             ],
                           ]),
                         ),
+                      ],
                       const SizedBox(height: 18),
                       const Text('Recent deliveries', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)),
                       const SizedBox(height: 10),
@@ -182,7 +222,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 subtitle: Text(DateFormat('d MMM, h:mm a').format(e.recent[i].at), style: const TextStyle(color: Rd.muted)),
                                 trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
                                   Text('+${rupees(e.recent[i].amount)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Rd.online, fontSize: 16)),
-                                  Text(e.recent[i].paidAt != null ? 'paid' : 'owed', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: e.recent[i].paidAt != null ? Rd.online : Rd.warn)),
+                                  if (e.hyperpikPays) Text(e.recent[i].paidAt != null ? 'paid' : 'owed', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: e.recent[i].paidAt != null ? Rd.online : Rd.warn)),
                                 ]),
                               ),
                             ],

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -123,6 +125,22 @@ class _StatusScreenState extends State<StatusScreen> {
   String? _uploading;
   String? _error;
   bool _editing = false;
+  Timer? _watch;
+
+  @override
+  void initState() {
+    super.initState();
+    // Approval happens on the admin side: look again every half minute so the rider is let in without pulling to refresh.
+    _watch = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_editing && _uploading == null) widget.onChanged();
+    });
+  }
+
+  @override
+  void dispose() {
+    _watch?.cancel();
+    super.dispose();
+  }
 
   Future<void> _upload(String kind) async {
     final source = await showModalBottomSheet<ImageSource>(
