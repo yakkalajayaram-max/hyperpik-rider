@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:convert';
+
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -36,6 +39,12 @@ class _WorkScreenState extends State<WorkScreen> with WidgetsBindingObserver {
   bool _busy = false;
   int _lastOfferCount = 0;
 
+  /// A step the rider took that has not reached the server yet (no network at the door). It is kept on the phone, shown as
+  /// "sending", and retried until the server answers, so a delivery done in a dead zone is not lost or done twice.
+  Map<String, dynamic>? _queued;
+  Timer? _retry;
+  static const _queueKey = 'rider_pending_step';
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +52,7 @@ class _WorkScreenState extends State<WorkScreen> with WidgetsBindingObserver {
     WorkService.configure();
     _loadToday();
     if (_online) _startWorking();
+    _loadQueue();
     _refresh();
   }
 
@@ -52,6 +62,7 @@ class _WorkScreenState extends State<WorkScreen> with WidgetsBindingObserver {
     _poll?.cancel();
     _ring?.cancel();
     _tick?.cancel();
+    _retry?.cancel();
     WakelockPlus.disable();
     super.dispose();
   }
@@ -195,25 +206,101 @@ class _WorkScreenState extends State<WorkScreen> with WidgetsBindingObserver {
     await _refresh();
   }
 
+  bool _offline(ApiException e) => e.status == null && !e.needsPin && e.message.startsWith('No connection');
+
+  Future<void> _loadQueue() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_queueKey);
+    if (raw == null) return;
+    try {
+      _queued = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      _startRetry();
+      if (mounted) setState(() {});
+      unawaited(_flush());
+    } catch (_) {}
+  }
+
+  Future<void> _saveQueue() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_queued == null) {
+      await prefs.remove(_queueKey);
+    } else {
+      await prefs.setString(_queueKey, jsonEncode(_queued));
+    }
+  }
+
+  void _startRetry() {
+    _retry?.cancel();
+    _retry = Timer.periodic(const Duration(seconds: 6), (_) => _flush());
+  }
+
   Future<void> _step(String step, {String? pin, String? reason}) async {
     final t = _active;
-    if (t == null) return;
+    if (t == null || _queued != null) return;
     try {
       await Api.step(t.id, step, pin: pin, overrideReason: reason);
-      if (step == 'delivered') {
-        HapticFeedback.heavyImpact();
-        if (mounted) setState(() => _active = null);
-        _loadToday();
-        if (mounted) _showDone(t);
-      }
-      await _refresh();
+      await _stepDone(t, step);
     } on ApiException catch (e) {
-      if (e.needsPin && step == 'delivered') {
+      if (_offline(e)) {
+        // No network: keep the step, show it as sending, and keep trying until the server confirms it.
+        _queued = {'tripId': t.id, 'step': step, 'pin': pin, 'reason': reason};
+        await _saveQueue();
+        _startRetry();
+        if (mounted) setState(() {});
+      } else if (e.needsPin && step == 'delivered') {
         await _askPin(e.message);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
+  }
+
+  bool _flushing = false;
+
+  Future<void> _flush() async {
+    final q = _queued;
+    if (q == null || _flushing) return;
+    _flushing = true;
+    try {
+      await Api.step(q['tripId'] as String, q['step'] as String, pin: q['pin'] as String?, overrideReason: q['reason'] as String?);
+      final t = _active;
+      _queued = null;
+      _retry?.cancel();
+      await _saveQueue();
+      if (t != null && t.id == q['tripId']) {
+        await _stepDone(t, q['step'] as String);
+      } else {
+        if (mounted) setState(() {});
+        await _refresh();
+      }
+    } on ApiException catch (e) {
+      if (!_offline(e)) {
+        // The server answered and said no (for example a wrong code): stop retrying and tell the rider.
+        _queued = null;
+        _retry?.cancel();
+        await _saveQueue();
+        if (e.needsPin) {
+          if (mounted) setState(() {});
+          await _askPin(e.message);
+        } else if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        }
+      }
+    } finally {
+      _flushing = false;
+    }
+  }
+
+  Future<void> _stepDone(Trip t, String step) async {
+    if (step == 'delivered') {
+      HapticFeedback.heavyImpact();
+      if (mounted) setState(() => _active = null);
+      _loadToday();
+      if (mounted) _showDone(t);
+    } else if (mounted) {
+      setState(() {});
+    }
+    await _refresh();
   }
 
   Future<void> _askPin(String message) async {
@@ -348,7 +435,7 @@ class _WorkScreenState extends State<WorkScreen> with WidgetsBindingObserver {
               ]),
               const SizedBox(height: 18),
               if (_active != null)
-                _TripPanel(trip: _active!, onStep: _step, onNavigate: _navigate, onDrop: _drop)
+                _TripPanel(trip: _active!, onStep: _step, onNavigate: _navigate, onDrop: _drop, pendingStep: _queued != null && _queued!['tripId'] == _active!.id ? _queued!['step'] as String : null)
               else if (_offers.isNotEmpty)
                 for (final o in _offers) _OfferCard(trip: o, busy: _busy, onAccept: () => _accept(o), onDecline: () => _decline(o))
               else
@@ -520,8 +607,10 @@ class _Leg extends StatelessWidget {
 }
 
 class _TripPanel extends StatelessWidget {
-  const _TripPanel({required this.trip, required this.onStep, required this.onNavigate, required this.onDrop});
+  const _TripPanel({required this.trip, required this.onStep, required this.onNavigate, required this.onDrop, this.pendingStep});
   final Trip trip;
+  /// A step waiting to reach the server (no network). While set, the slider is replaced by a sending notice.
+  final String? pendingStep;
   final Future<void> Function(String step, {String? pin, String? reason}) onStep;
   final Future<void> Function(double?, double?, String?) onNavigate;
   final VoidCallback onDrop;
@@ -564,7 +653,9 @@ class _TripPanel extends StatelessWidget {
           const SizedBox(height: 6),
           for (final i in trip.items) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text('${i.quantity} × ${i.name}', style: const TextStyle(fontWeight: FontWeight.w700))),
           const SizedBox(height: 18),
-          if (trip.status == 'assigned')
+          if (pendingStep != null)
+            _SendingNotice(step: pendingStep!)
+          else if (trip.status == 'assigned')
             SlideToConfirm(label: "Slide when you're at the shop", color: Rd.accent, onConfirmed: () => onStep('arrived_pickup'))
           else
             SlideToConfirm(label: 'Slide when picked up', color: const Color(0xFFF97316), onConfirmed: () => onStep('picked_up')),
@@ -581,9 +672,38 @@ class _TripPanel extends StatelessWidget {
             ],
           ]),
           const SizedBox(height: 18),
-          SlideToConfirm(label: 'Slide when delivered', color: Rd.online, onConfirmed: () => onStep('delivered')),
+          if (pendingStep != null)
+            _SendingNotice(step: pendingStep!)
+          else
+            SlideToConfirm(label: 'Slide when delivered', color: Rd.online, onConfirmed: () => onStep('delivered')),
         ],
-        if (toShop) TextButton(onPressed: onDrop, style: TextButton.styleFrom(foregroundColor: Rd.bad), child: const Text('Give up this delivery')),
+        if (toShop && pendingStep == null) TextButton(onPressed: onDrop, style: TextButton.styleFrom(foregroundColor: Rd.bad), child: const Text('Give up this delivery')),
+      ]),
+    );
+  }
+}
+
+/// Shown instead of the slider while a step has not reached the server: it spins and says it will confirm by itself.
+class _SendingNotice extends StatelessWidget {
+  const _SendingNotice({required this.step});
+  final String step;
+
+  @override
+  Widget build(BuildContext context) {
+    final what = step == 'delivered' ? 'Delivery' : step == 'picked_up' ? 'Pick-up' : 'Arrival';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Rd.warn.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(16)),
+      child: Row(children: [
+        const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 3, color: Rd.warn)),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Text(
+            '$what saved on this phone. Sending to Hyperpik, it will confirm by itself as soon as you have network. Keep the app open.',
+            style: const TextStyle(color: Rd.warn, fontWeight: FontWeight.w700, height: 1.35),
+          ),
+        ),
       ]),
     );
   }
