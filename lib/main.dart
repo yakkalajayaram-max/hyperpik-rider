@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/api.dart';
+import 'core/app_update.dart';
 import 'core/config.dart';
 import 'core/models.dart';
 import 'core/theme.dart';
@@ -14,6 +15,7 @@ import 'features/shell/rider_shell.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(url: AppConfig.supabaseUrl, anonKey: AppConfig.supabaseAnonKey);
+  AppUpdate.instance.start();
   runApp(const RiderApp());
 }
 
@@ -26,6 +28,7 @@ class RiderApp extends StatelessWidget {
       title: 'Hyperpik Rider',
       debugShowCheckedModeBanner: false,
       theme: Rd.theme(),
+      builder: (context, child) => UpdateGate(child: child ?? const SizedBox.shrink()),
       home: const _Gate(),
     );
   }

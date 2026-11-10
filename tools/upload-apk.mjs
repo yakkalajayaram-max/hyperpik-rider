@@ -44,3 +44,39 @@ for (const name of names) {
   }
   console.log(`Uploaded ${name} (${body.length} bytes) to bucket ${bucket}`);
 }
+
+// OTA manifest: the installed app reads this to learn that a newer build exists (lib/core/app_update.dart).
+if (args.get("manifest") === "true") {
+  const { createHash } = await import("node:crypto");
+  const auth = { apikey: key, Authorization: "Bearer " + key };
+  let previous = {};
+  const cur = await fetch(`${url}/storage/v1/object/${bucket}/manifest.json`, { headers: auth });
+  if (cur.ok) previous = (await cur.json()).android ?? {};
+  if (previous.build && Number(m[2]) < previous.build && args.get("force") !== "true") {
+    console.error(`Refusing: build ${m[2]} is older than the published ${previous.build}.`);
+    process.exit(1);
+  }
+  const manifest = {
+    android: {
+      version: m[1],
+      build: Number(m[2]),
+      // Keep the previous floor; lowering it by accident would let a broken build keep running.
+      minBuild: args.get("min-build") !== undefined ? Number(args.get("min-build")) : (previous.minBuild ?? 0),
+      path: names[0],
+      sha256: createHash("sha256").update(body).digest("hex"),
+      size: body.length,
+      notes: args.get("notes") ?? "",
+      publishedAt: new Date().toISOString(),
+    },
+  };
+  const res = await fetch(`${url}/storage/v1/object/${bucket}/manifest.json`, {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/json", "x-upsert": "true", "cache-control": "0" },
+    body: JSON.stringify(manifest, null, 2),
+  });
+  if (!res.ok) {
+    console.error(`Manifest upload failed: ${res.status} ${await res.text()}`);
+    process.exit(1);
+  }
+  console.log("Manifest updated: " + names[0]);
+}

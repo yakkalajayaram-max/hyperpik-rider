@@ -64,4 +64,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node tools/upload-apk.mjs --apk build/app/outputs/flutter-apk/app-release.apk --app rider --bucket rider-app-releases
+          NOTES: ${{ github.ref_name }}
+        run: node tools/upload-apk.mjs --apk build/app/outputs/flutter-apk/app-release.apk --app rider --bucket rider-app-releases --manifest true --notes "$NOTES"
